@@ -1,3 +1,8 @@
+# Project specific
+Misery.png
+history*
+email.html
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
