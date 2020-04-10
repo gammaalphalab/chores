@@ -31,14 +31,6 @@
 # have misery level zero, regardless of what the Google sheet says, which
 # makes it likely that new people will quickly rotate through all the chores.
 #
-# Additional features that would be nice but are not implemented yet:
-#  1) A way to set a specific person to a specific chore as is sometimes
-#     appropriate at the discretion of the house manager (e.g. when it
-#     connects to other on-going work the housemate is doing).  Currently, the
-#     way to do that would be just pretend that person is out of town and
-#     that chore does not need to be done, and let the rest get assigned, then
-#     add the person back in.
-#
 ##########
 
 
@@ -127,7 +119,7 @@ def get_preferences():
             prefs[person][chore]=0
 
     # Success, return it
-    print("Got preferences")
+    print("Got preferences\n")
     return all_names, all_chores, prefs, knowns
 
 def get_current_situation(all_names,all_chores):
@@ -139,12 +131,18 @@ def get_current_situation(all_names,all_chores):
     Also checks the knownpeople.txt, so any chore that a person hasn't done is 
     overwritten as zero misery.
 
+    Also checks if there are any "forced" chore assignments.  Those are
+    returned separately (ie in the return values below, there will be no
+    overlap between names and force_names, or chores and force_chores).
+
     Args:
         all_names, all_chores: as returned by get_preferences
 
     Returns:
         names: a list of strings, names (initials) of people present
         chores: a list of strings, chores to do this weekend
+        force_names: a list of strings, people pre-assigned specific chores
+        force_chores: a list of strings, chores pre-assigned specifically
     """
 
     # Print all names
@@ -167,7 +165,7 @@ def get_current_situation(all_names,all_chores):
 
     # Print who's here
     names=[name for name in all_names if name not in oot]
-    print("Residents in town:    ",", ".join(names))
+    print("\nResidents in town:    ",", ".join(names))
 
     # Print the person count and total chore count
     lnames=len(names)
@@ -190,7 +188,7 @@ def get_current_situation(all_names,all_chores):
     else:
 
         # Remind user of the list
-        print("Chores list is: "+", ".join(all_chores))
+        print("\nChores list is: "+", ".join(all_chores))
 
         # Keep asking until we get a valid set of chores to skip
         valid_input=False
@@ -217,8 +215,47 @@ def get_current_situation(all_names,all_chores):
         chores=[chore for chore in all_chores if chore not in sk]
         print("Chores list is: "+", ".join(chores))
 
+    # Will contain the names and chores assigned specifically
+    force_names,force_chores=[],[]
+
+    # Keep asking until valid specific assignments or none
+    while True:
+        spec=input("\nDo you want to place anyone on a specific chore?\n"\
+                "If so, enter as, e.g., \"SB:Front,IM:Hall...\", otherwise"\
+                " just Enter: ")
+
+        # If user just hit enter, we're done
+        if spec=="":
+            break
+
+        # Otherwise break up their answer
+        else:
+            try:
+                pairs=spec.split(",")
+                for pair in pairs:
+                    force_name,force_chore=pair.split(":")
+
+                    # Make sure every part is valid
+                    assert force_name in names, "Invalid: "+force_name+"?"
+                    assert force_chore in chores, "Invalid: "+force_chore+"?"
+                    assert force_name not in force_names,\
+                            "Doubled "+force_name
+                    assert force_chore not in force_chores,\
+                            "Doubled "+force_chore
+
+                    # Move those names and chores to separate lists
+                    force_names+=[force_name]
+                    names.remove(force_name)
+                    force_chores+=[force_chore]
+                    chores.remove(force_chore)
+                break
+            
+            # If not valid, warn and try again
+            except Exception as e:
+                print(e)
+
     # Success, return
-    return names, chores
+    return names, chores, force_names, force_chores
 
 
 def weekinfo():
@@ -736,7 +773,8 @@ def main():
     all_names, all_chores, prefs, knowns =get_preferences()
 
     # Narrow down to what people and chores we want this week
-    names, chores=get_current_situation(all_names,all_chores)
+    names, chores, force_names, force_chores=\
+            get_current_situation(all_names,all_chores)
     del all_names, all_chores
     print("\n\n")
 
@@ -806,8 +844,10 @@ def main():
         chores=improve(names,chores,prefs,restricted_askers=sad,
                largeloop=False)
 
-    # Print the final assignments
-    print("Here's the final condition")
+    # Print the final assignments, adding in forced assignments
+    print("\n\nHere's the final condition")
+    names+=force_names
+    chores+=force_chores
     print_chores(names,chores)
 
     # Update the knowns list
@@ -820,7 +860,7 @@ def main():
 
     # Confirm before altering any external files
     while True:
-        act=input("Save these results into history, or cancel? [S or C]: ")
+        act=input("\nSave these results into history, or cancel? [S or C]: ")
 
         # Add to history, known list, make a chart, and make the email
         if act.lower()=='s':
