@@ -2,6 +2,11 @@
 Misery.png
 history*
 email.html
+knownpeople*
+
+# Vim
+*.swp
+*.swo
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

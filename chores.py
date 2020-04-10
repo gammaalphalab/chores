@@ -27,12 +27,12 @@
 # software of choice, a history file is recorded, and a bar chart of the
 # optimization results is produced.
 #
+# Note: if someone has never done a particular chore before, that chore will
+# have misery level zero, regardless of what the Google sheet says, which
+# makes it likely that new people will quickly rotate through all the chores.
+#
 # Additional features that would be nice but are not implemented yet:
-#  1) New people have to do every chore once before they are allowed to swap
-#     Currently I just "bias" that to happen by manually controlling new
-#     people's preferences so that everything they haven't done yet is a 1
-#     and everything they have is a 12.  Obviously could be better.
-#  2) A way to set a specific person to a specific chore as is sometimes
+#  1) A way to set a specific person to a specific chore as is sometimes
 #     appropriate at the discretion of the house manager (e.g. when it
 #     connects to other on-going work the housemate is doing).  Currently, the
 #     way to do that would be just pretend that person is out of town and
@@ -76,6 +76,8 @@ def get_preferences():
         all_names: a list of strings, the initials of each person
         all_chores: a list of strings, the chore names
         prefs: a dict of preferences, accessed as prefs[PERSONNAME][CHORENAME] 
+        knowns: as returned by read_knownpeople, but with new people added and
+            former people removed
     """
 
     # Try to connect and retreive the data
@@ -91,6 +93,23 @@ def get_preferences():
     all_names=lines[0].split('\t')[1:]
     all_chores=[r[0] for r in data if r[0]!='Wild']
 
+    # Read the current known people list
+    knowns=read_knownpeople(all_chores)
+
+    # Add in any new appearances
+    for name in all_names:
+        if name not in knowns:
+            print(name+" seems to be new.  Adding into known people list.")
+            knowns[name]=all_chores
+
+    # Remove anyone no longer in the spreadsheet
+    for name in list(knowns.keys()):
+        if name not in all_names:
+            print(name+" seems to have moved out."\
+                    "  Deleting from known people list.\n"\
+                    "  [If you kill script now, this will not be done.]")
+            del knowns[name]
+
     # Form a dictionary of people's preferences
     prefs={}
     for i,n in enumerate(all_names):
@@ -102,9 +121,14 @@ def get_preferences():
             assert p>=1 and p<=(len(data))
             prefs[n][r[0]]=p
 
+    # Overwrite never-done chores with zero misery
+    for person, trychores in knowns.items():
+        for chore in trychores:
+            prefs[person][chore]=0
+
     # Success, return it
     print("Got preferences")
-    return all_names, all_chores, prefs
+    return all_names, all_chores, prefs, knowns
 
 def get_current_situation(all_names,all_chores):
     """Prompts user to find out who is in town and what chores are needed.
@@ -112,6 +136,9 @@ def get_current_situation(all_names,all_chores):
     Asks which residents are out of town and which chores to skip.
     Ensures that the number of residents is at least the number of chores.
     
+    Also checks the knownpeople.txt, so any chore that a person hasn't done is 
+    overwritten as zero misery.
+
     Args:
         all_names, all_chores: as returned by get_preferences
 
@@ -170,7 +197,8 @@ def get_current_situation(all_names,all_chores):
         while valid_input is False:
 
             # Ask and interpret response as a comma-separated chore list
-            sk=input("Which chores to skip? (comma-separated list, or just hit Enter): ")
+            sk=input("Which chores to skip?"\
+                    " (comma-separated list, or just hit Enter): ")
             sk=[chore.strip() for chore in sk.strip().split(',') if chore!='']
 
             # If one chore name does not make sense, warn and ask again
@@ -226,7 +254,7 @@ def weekinfo():
     return fourweekno, weekno, mon, moncy
 
 def read_history():
-    """Reads the current history file and returns its contents.
+    """Reads the history file and returns its contents.
 
     The history is in 'history.txt' and contains what chore everyone did ever.
     Each row of the file is first, a date YYYY-MM-DD for the Monday of a week,
@@ -257,6 +285,57 @@ def read_history():
                 mon,
                 dict([x.strip().split(':') for x in assig.split(',')])]]
         return hist
+
+def read_knownpeople(all_chores):
+    """Reads the knownpeople file and returns its contents.
+
+    The new people information is in 'knownpeople.txt' and contains what chores
+    any person has not done before. Each row of the file is a name, followed by
+    a comma-separated list of chores that have never been assigned to that
+    person.
+
+    Returns:
+        knowns: a dict mapping names to never-done chores 
+    """
+    # Will contain the new people info
+    knowns={}
+
+    # Open the file
+    with open("knownpeople.txt",'r') as f:
+
+        # Get each row
+        for l in f:
+            name,chores=l.split(":")
+            chores=[chore.strip() for chore in chores.split(',')\
+                    if chore.strip()!=""]
+
+            # Check that the chore names are valid
+            for chore in chores:
+                assert chore in all_chores,\
+                    "Chore {} in knownpeople.txt"\
+                    " not recognized".format(chore)
+
+            # Add to dict
+            knowns[name]=chores
+
+    # Success, return
+    return knowns
+
+def write_knownpeople(knowns):
+    """Write out the new people information.
+
+    Puts the contents of knowns into the knownpeople.txt file.
+
+    Args:
+        knowns: as returned from read_knownpeople
+    """
+
+    # Open the file
+    with open("knownpeople.txt",'w') as f:
+
+        # Spit out each row
+        for name,chores in knowns.items():
+            f.write(name+":"+",".join(chores)+"\n")
 
 def get_from_current_cycle(hist,moncy,names,chores):
     """ Gets the chore assignments baseline for this cycle. 
@@ -654,7 +733,7 @@ def main():
     """Runs everything as described at the top."""
 
     # Get the preferences from the Misery spreadsheet
-    all_names, all_chores, prefs=get_preferences()
+    all_names, all_chores, prefs, knowns =get_preferences()
 
     # Narrow down to what people and chores we want this week
     names, chores=get_current_situation(all_names,all_chores)
@@ -724,17 +803,36 @@ def main():
         chores=improve(names,chores,prefs)
     else:
         print("Attempting a single-switch improvement")
-        chores=improve(names,chores,prefs,restricted_askers=sad,largeloop=False)
+        chores=improve(names,chores,prefs,restricted_askers=sad,
+               largeloop=False)
 
     # Print the final assignments
     print("Here's the final condition")
     print_chores(names,chores)
 
-    # Add to history, make a chart, and make the email
-    add_to_history(hist,mon,names,chores)
-    show_improvement(names,chores,oldchores,prefs)
-    make_email(names,chores,weekno,mon)
+    # Update the knowns list
+    for name,chore in zip(names,chores):
+        if chore in knowns[name]:
 
+            # Alert about first-timers
+            print(name+" is doing "+chore+" for the first time.")
+            knowns[name].remove(chore)
+
+    # Confirm before altering any external files
+    while True:
+        act=input("Save these results into history, or cancel? [S or C]: ")
+
+        # Add to history, known list, make a chart, and make the email
+        if act.lower()=='s':
+            add_to_history(hist,mon,names,chores)
+            write_knownpeople(knowns)
+            show_improvement(names,chores,oldchores,prefs)
+            make_email(names,chores,weekno,mon)
+            exit()
+
+        # Or just quit
+        elif act.lower()=='c':
+            exit()
 # Go
 if __name__=="__main__":
     main()
